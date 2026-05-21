@@ -1,239 +1,152 @@
 import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
-from wordcloud import WordCloud
-from collections import Counter
-import re
-import os
-from youtube_comment_downloader import YoutubeCommentDownloader
 
 st.set_page_config(
-    page_title="유튜브 댓글 분석기",
-    page_icon="☁️",
+    page_title="MBTI 진로 & 포켓몬 추천",
+    page_icon="🎮",
     layout="wide"
 )
 
-st.title("☁️ 자주 등장하는 단어 워드클라우드")
-st.write("유튜브 영상 링크를 입력하면 댓글을 수집하고 자주 등장하는 단어를 분석합니다.")
+st.title("🎮 MBTI 진로 & 포켓몬 캐릭터 추천")
+st.write("MBTI를 선택하면 어울리는 진로와 포켓몬 캐릭터를 추천해줍니다.")
 
-# -----------------------------
-# 한글 폰트 설정
-# -----------------------------
-FONT_PATH = "NanumGothic.ttf"
-
-def get_font_path():
-    if os.path.exists(FONT_PATH):
-        return FONT_PATH
-    return None
-
-# -----------------------------
-# 댓글 수집
-# -----------------------------
-@st.cache_data(show_spinner=False)
-def load_comments(video_url, max_comments):
-    downloader = YoutubeCommentDownloader()
-    comments = []
-
-    for comment in downloader.get_comments_from_url(video_url, sort_by=0):
-        comments.append({
-            "작성자": comment.get("author", ""),
-            "댓글": comment.get("text", ""),
-            "좋아요": comment.get("votes", 0),
-            "시간": comment.get("time", "")
-        })
-
-        if len(comments) >= max_comments:
-            break
-
-    return pd.DataFrame(comments)
-
-# -----------------------------
-# 텍스트 정리
-# -----------------------------
-def clean_text(text):
-    text = str(text)
-    text = re.sub(r"http\S+", " ", text)
-    text = re.sub(r"[^가-힣a-zA-Z0-9\s]", " ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
-
-def extract_words(text_list):
-    stopwords = {
-        "그리고", "하지만", "너무", "정말", "진짜", "영상", "댓글",
-        "입니다", "합니다", "해서", "하는", "있는", "없는", "으로",
-        "에서", "에게", "이거", "저거", "그거", "ㅋㅋ", "ㅎㅎ",
-        "the", "and", "you", "this", "that", "with", "for", "are"
+mbti_data = {
+    "INTJ": {
+        "nickname": "전략가형",
+        "career": ["데이터 분석가", "인공지능 개발자", "전략기획자", "연구원", "소프트웨어 엔지니어"],
+        "pokemon": "뮤츠",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/150.png",
+        "reason": "논리적이고 독립적이며 전략적으로 문제를 해결하는 성향이 강합니다."
+    },
+    "INTP": {
+        "nickname": "논리술사형",
+        "career": ["프로그래머", "과학자", "게임 개발자", "정보보안 전문가", "발명가"],
+        "pokemon": "메타몽",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/132.png",
+        "reason": "호기심이 많고 새로운 아이디어를 탐구하는 데 강점이 있습니다."
+    },
+    "ENTJ": {
+        "nickname": "통솔자형",
+        "career": ["CEO", "프로젝트 매니저", "변호사", "경영 컨설턴트", "창업가"],
+        "pokemon": "리자몽",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/6.png",
+        "reason": "목표 지향적이고 리더십이 뛰어나 조직을 이끄는 역할에 잘 어울립니다."
+    },
+    "ENTP": {
+        "nickname": "토론가형",
+        "career": ["마케터", "기획자", "광고 전문가", "스타트업 창업가", "방송인"],
+        "pokemon": "고라파덕",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/54.png",
+        "reason": "아이디어가 풍부하고 유연한 사고로 새로운 도전을 즐깁니다."
+    },
+    "INFJ": {
+        "nickname": "옹호자형",
+        "career": ["상담가", "교사", "작가", "사회복지사", "심리학자"],
+        "pokemon": "라티아스",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/380.png",
+        "reason": "사람을 깊이 이해하고 의미 있는 가치를 추구하는 성향이 있습니다."
+    },
+    "INFP": {
+        "nickname": "중재자형",
+        "career": ["작가", "디자이너", "일러스트레이터", "상담사", "콘텐츠 크리에이터"],
+        "pokemon": "이브이",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/133.png",
+        "reason": "감수성이 풍부하고 자신만의 가능성과 개성을 중요하게 생각합니다."
+    },
+    "ENFJ": {
+        "nickname": "선도자형",
+        "career": ["교사", "강사", "인사담당자", "상담가", "사회운동가"],
+        "pokemon": "피카츄",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/25.png",
+        "reason": "타인에게 긍정적인 영향을 주고 함께 성장하는 것을 좋아합니다."
+    },
+    "ENFP": {
+        "nickname": "활동가형",
+        "career": ["유튜버", "홍보 전문가", "이벤트 기획자", "배우", "창작자"],
+        "pokemon": "파이리",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/4.png",
+        "reason": "에너지가 넘치고 창의적인 표현 활동에 강점이 있습니다."
+    },
+    "ISTJ": {
+        "nickname": "현실주의자형",
+        "career": ["공무원", "회계사", "품질관리자", "법무사", "데이터 관리자"],
+        "pokemon": "꼬부기",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/7.png",
+        "reason": "책임감이 강하고 체계적이며 정확한 업무에 잘 어울립니다."
+    },
+    "ISFJ": {
+        "nickname": "수호자형",
+        "career": ["간호사", "교사", "사회복지사", "행정직", "보건의료직"],
+        "pokemon": "럭키",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/113.png",
+        "reason": "배려심이 깊고 다른 사람을 돕는 일에서 보람을 느낍니다."
+    },
+    "ESTJ": {
+        "nickname": "경영자형",
+        "career": ["관리자", "경찰관", "군인", "행정가", "금융 전문가"],
+        "pokemon": "거북왕",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/9.png",
+        "reason": "규칙과 질서를 중시하며 책임감 있게 조직을 운영합니다."
+    },
+    "ESFJ": {
+        "nickname": "집정관형",
+        "career": ["교사", "간호사", "서비스 관리자", "홍보 담당자", "호텔리어"],
+        "pokemon": "푸린",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/39.png",
+        "reason": "사교성이 좋고 주변 사람들과 조화롭게 협력하는 데 강합니다."
+    },
+    "ISTP": {
+        "nickname": "장인형",
+        "career": ["엔지니어", "자동차 정비사", "드론 조종사", "소방관", "기계 설계자"],
+        "pokemon": "루카리오",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/448.png",
+        "reason": "손으로 직접 만들고 문제를 해결하는 실용적인 능력이 뛰어납니다."
+    },
+    "ISFP": {
+        "nickname": "모험가형",
+        "career": ["디자이너", "사진작가", "미용사", "음악가", "플로리스트"],
+        "pokemon": "님피아",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/700.png",
+        "reason": "감각적이고 예술적인 표현을 즐기며 섬세한 감성이 돋보입니다."
+    },
+    "ESTP": {
+        "nickname": "사업가형",
+        "career": ["영업 전문가", "운동선수", "경찰관", "응급구조사", "이벤트 기획자"],
+        "pokemon": "잠만보",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/143.png",
+        "reason": "활동적이고 상황 판단이 빨라 현장에서 강점을 발휘합니다."
+    },
+    "ESFP": {
+        "nickname": "연예인형",
+        "career": ["배우", "가수", "크리에이터", "뷰티 아티스트", "행사 진행자"],
+        "pokemon": "토게피",
+        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/175.png",
+        "reason": "밝고 활발하며 사람들에게 즐거움을 주는 활동에 잘 어울립니다."
     }
+}
 
-    full_text = " ".join(text_list)
-    full_text = clean_text(full_text)
-    words = full_text.split()
-
-    words = [
-        word for word in words
-        if len(word) >= 2 and word not in stopwords
-    ]
-
-    return Counter(words)
-
-# -----------------------------
-# 사이드바
-# -----------------------------
-st.sidebar.header("⚙️ 분석 설정")
-
-video_url = st.sidebar.text_input(
-    "유튜브 영상 URL",
-    placeholder="https://www.youtube.com/watch?v=..."
+mbti = st.selectbox(
+    "나의 MBTI를 선택하세요",
+    list(mbti_data.keys())
 )
 
-max_comments = st.sidebar.slider(
-    "수집할 댓글 수",
-    min_value=50,
-    max_value=1000,
-    value=300,
-    step=50
-)
+result = mbti_data[mbti]
 
-start_button = st.sidebar.button("댓글 분석 시작")
+st.divider()
 
-# -----------------------------
-# 실행
-# -----------------------------
-if start_button:
-    if not video_url:
-        st.warning("유튜브 영상 URL을 입력해주세요.")
-        st.stop()
+col1, col2 = st.columns([1, 2])
 
-    font_path = get_font_path()
+with col1:
+    st.image(result["image"], width=220)
+    st.subheader(f"추천 포켓몬: {result['pokemon']}")
 
-    if font_path is None:
-        st.error("NanumGothic.ttf 파일을 찾을 수 없습니다. GitHub에 폰트 파일을 업로드해주세요.")
-        st.stop()
+with col2:
+    st.header(f"{mbti} - {result['nickname']}")
+    st.write(result["reason"])
 
-    st.info(f"사용 중인 폰트 파일: {font_path}")
+    st.subheader("💼 어울리는 진로")
+    for job in result["career"]:
+        st.write(f"- {job}")
 
-    try:
-        with st.spinner("댓글을 수집하는 중입니다..."):
-            df = load_comments(video_url, max_comments)
+st.divider()
 
-    except Exception as e:
-        st.error("댓글 수집 중 오류가 발생했습니다.")
-        st.code(str(e))
-        st.stop()
-
-    if df.empty:
-        st.warning("수집된 댓글이 없습니다.")
-        st.stop()
-
-    st.success(f"댓글 {len(df)}개를 수집했습니다.")
-
-    df["좋아요"] = pd.to_numeric(df["좋아요"], errors="coerce").fillna(0).astype(int)
-
-    # -----------------------------
-    # 요약
-    # -----------------------------
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric("수집 댓글 수", f"{len(df)}개")
-    col2.metric("총 좋아요 수", f"{df['좋아요'].sum():,}개")
-    col3.metric("평균 좋아요 수", f"{df['좋아요'].mean():.1f}개")
-
-    st.divider()
-
-    # -----------------------------
-    # 댓글 데이터
-    # -----------------------------
-    st.subheader("📋 수집된 댓글")
-    st.dataframe(df, use_container_width=True)
-
-    csv = df.to_csv(index=False).encode("utf-8-sig")
-
-    st.download_button(
-        label="📥 댓글 데이터 CSV 다운로드",
-        data=csv,
-        file_name="youtube_comments.csv",
-        mime="text/csv"
-    )
-
-    st.divider()
-
-    # -----------------------------
-    # 좋아요 TOP 10
-    # -----------------------------
-    st.subheader("👍 좋아요 수 TOP 10 댓글")
-
-    top_like = df.sort_values("좋아요", ascending=False).head(10)
-    st.dataframe(top_like[["작성자", "댓글", "좋아요"]], use_container_width=True)
-
-    fig1, ax1 = plt.subplots(figsize=(10, 5))
-    ax1.barh(top_like["작성자"].astype(str), top_like["좋아요"])
-    ax1.set_xlabel("좋아요 수")
-    ax1.set_ylabel("작성자")
-    ax1.set_title("좋아요 수 TOP 10")
-    ax1.invert_yaxis()
-    st.pyplot(fig1)
-
-    st.divider()
-
-    # -----------------------------
-    # 단어 빈도 분석
-    # -----------------------------
-    st.subheader("🔤 자주 등장하는 단어 TOP 20")
-
-    word_counts = extract_words(df["댓글"].tolist())
-
-    if len(word_counts) == 0:
-        st.warning("분석할 단어가 부족합니다.")
-        st.stop()
-
-    word_df = pd.DataFrame(
-        word_counts.most_common(20),
-        columns=["단어", "빈도"]
-    )
-
-    st.dataframe(word_df, use_container_width=True)
-
-    fig2, ax2 = plt.subplots(figsize=(10, 5))
-    ax2.bar(word_df["단어"], word_df["빈도"])
-    ax2.set_xlabel("단어")
-    ax2.set_ylabel("빈도")
-    ax2.set_title("자주 등장하는 단어 TOP 20")
-    plt.xticks(rotation=45)
-    st.pyplot(fig2)
-
-    st.divider()
-
-    # -----------------------------
-    # 워드클라우드
-    # -----------------------------
-    st.subheader("☁️ 워드클라우드")
-
-    try:
-        wordcloud = WordCloud(
-            font_path=font_path,
-            width=1000,
-            height=500,
-            background_color="white",
-            max_words=100
-        ).generate_from_frequencies(word_counts)
-
-        fig3, ax3 = plt.subplots(figsize=(12, 6))
-        ax3.imshow(wordcloud, interpolation="bilinear")
-        ax3.axis("off")
-        st.pyplot(fig3)
-
-    except Exception as e:
-        st.error("워드클라우드 생성 중 오류가 발생했습니다.")
-        st.code(str(e))
-        st.stop()
-
-else:
-    st.info("왼쪽 사이드바에 유튜브 영상 URL을 입력하고 [댓글 분석 시작]을 누르세요.")
-
-    st.markdown("""
-    ### 사용 방법
-    1. 유튜브 영상 URL 입력  
-    2. 수집할 댓글 수 선택  
-    3. 댓글 분석 시작 클릭  
-    4. 댓글 목록, 좋아요 분석, 단어 빈도, 워드클라우드 확인  
-    """)
+st.info("※ 이 결과는 재미와 진로 탐색 활동을 위한 참고용입니다. 실제 진로 선택은 흥미, 역량, 가치관, 경험을 함께 고려해야 합니다.")
