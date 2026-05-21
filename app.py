@@ -7,10 +7,14 @@ import re
 import os
 from youtube_comment_downloader import YoutubeCommentDownloader
 
-st.set_page_config(page_title="유튜브 댓글 분석기", page_icon="☁️", layout="wide")
+st.set_page_config(
+    page_title="유튜브 댓글 분석기",
+    page_icon="☁️",
+    layout="wide"
+)
 
-st.title("☁️ 유튜브 댓글 분석 웹앱")
-st.write("유튜브 영상 링크를 입력하면 댓글을 수집하고, 좋아요 수 분석과 워드클라우드를 보여줍니다.")
+st.title("☁️ 자주 등장하는 단어 워드클라우드")
+st.write("유튜브 영상 링크를 입력하면 댓글을 수집하고 자주 등장하는 단어를 분석합니다.")
 
 # -----------------------------
 # 한글 폰트 설정
@@ -23,32 +27,28 @@ def get_font_path():
     return None
 
 # -----------------------------
-# 유튜브 댓글 수집 함수
+# 댓글 수집
 # -----------------------------
 @st.cache_data(show_spinner=False)
 def load_comments(video_url, max_comments):
     downloader = YoutubeCommentDownloader()
     comments = []
 
-    try:
-        for comment in downloader.get_comments_from_url(video_url, sort_by=0):
-            comments.append({
-                "작성자": comment.get("author", ""),
-                "댓글": comment.get("text", ""),
-                "좋아요": comment.get("votes", 0),
-                "시간": comment.get("time", "")
-            })
+    for comment in downloader.get_comments_from_url(video_url, sort_by=0):
+        comments.append({
+            "작성자": comment.get("author", ""),
+            "댓글": comment.get("text", ""),
+            "좋아요": comment.get("votes", 0),
+            "시간": comment.get("time", "")
+        })
 
-            if len(comments) >= max_comments:
-                break
+        if len(comments) >= max_comments:
+            break
 
-    except Exception as e:
-        return pd.DataFrame(), str(e)
-
-    return pd.DataFrame(comments), None
+    return pd.DataFrame(comments)
 
 # -----------------------------
-# 텍스트 전처리
+# 텍스트 정리
 # -----------------------------
 def clean_text(text):
     text = str(text)
@@ -57,20 +57,21 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-def extract_words(texts):
+def extract_words(text_list):
     stopwords = {
         "그리고", "하지만", "너무", "정말", "진짜", "영상", "댓글",
-        "입니다", "합니다", "해서", "하는", "있는", "없는",
-        "the", "and", "you", "this", "that", "with", "for"
+        "입니다", "합니다", "해서", "하는", "있는", "없는", "으로",
+        "에서", "에게", "이거", "저거", "그거", "ㅋㅋ", "ㅎㅎ",
+        "the", "and", "you", "this", "that", "with", "for", "are"
     }
 
-    all_text = " ".join(texts)
-    all_text = clean_text(all_text)
+    full_text = " ".join(text_list)
+    full_text = clean_text(full_text)
+    words = full_text.split()
 
-    words = all_text.split()
     words = [
-        w for w in words
-        if len(w) >= 2 and w not in stopwords
+        word for word in words
+        if len(word) >= 2 and word not in stopwords
     ]
 
     return Counter(words)
@@ -78,26 +79,46 @@ def extract_words(texts):
 # -----------------------------
 # 사이드바
 # -----------------------------
-st.sidebar.header("⚙️ 설정")
-video_url = st.sidebar.text_input("유튜브 영상 URL 입력")
-max_comments = st.sidebar.slider("수집할 댓글 수", 50, 1000, 300, 50)
+st.sidebar.header("⚙️ 분석 설정")
 
-analyze_btn = st.sidebar.button("댓글 분석 시작")
+video_url = st.sidebar.text_input(
+    "유튜브 영상 URL",
+    placeholder="https://www.youtube.com/watch?v=..."
+)
+
+max_comments = st.sidebar.slider(
+    "수집할 댓글 수",
+    min_value=50,
+    max_value=1000,
+    value=300,
+    step=50
+)
+
+start_button = st.sidebar.button("댓글 분석 시작")
 
 # -----------------------------
-# 메인
+# 실행
 # -----------------------------
-if analyze_btn:
+if start_button:
     if not video_url:
         st.warning("유튜브 영상 URL을 입력해주세요.")
         st.stop()
 
-    with st.spinner("댓글을 수집하는 중입니다..."):
-        df, error = load_comments(video_url, max_comments)
+    font_path = get_font_path()
 
-    if error:
+    if font_path is None:
+        st.error("NanumGothic.ttf 파일을 찾을 수 없습니다. GitHub에 폰트 파일을 업로드해주세요.")
+        st.stop()
+
+    st.info(f"사용 중인 폰트 파일: {font_path}")
+
+    try:
+        with st.spinner("댓글을 수집하는 중입니다..."):
+            df = load_comments(video_url, max_comments)
+
+    except Exception as e:
         st.error("댓글 수집 중 오류가 발생했습니다.")
-        st.code(error)
+        st.code(str(e))
         st.stop()
 
     if df.empty:
@@ -106,35 +127,29 @@ if analyze_btn:
 
     st.success(f"댓글 {len(df)}개를 수집했습니다.")
 
-    # 좋아요 숫자 정리
     df["좋아요"] = pd.to_numeric(df["좋아요"], errors="coerce").fillna(0).astype(int)
 
     # -----------------------------
-    # 요약 지표
+    # 요약
     # -----------------------------
     col1, col2, col3 = st.columns(3)
 
-    with col1:
-        st.metric("수집 댓글 수", f"{len(df)}개")
-
-    with col2:
-        st.metric("총 좋아요 수", f"{df['좋아요'].sum():,}개")
-
-    with col3:
-        st.metric("평균 좋아요 수", f"{df['좋아요'].mean():.1f}개")
+    col1.metric("수집 댓글 수", f"{len(df)}개")
+    col2.metric("총 좋아요 수", f"{df['좋아요'].sum():,}개")
+    col3.metric("평균 좋아요 수", f"{df['좋아요'].mean():.1f}개")
 
     st.divider()
 
     # -----------------------------
-    # 댓글 원본 보기
+    # 댓글 데이터
     # -----------------------------
     st.subheader("📋 수집된 댓글")
     st.dataframe(df, use_container_width=True)
 
-    # CSV 다운로드
     csv = df.to_csv(index=False).encode("utf-8-sig")
+
     st.download_button(
-        label="댓글 데이터 CSV 다운로드",
+        label="📥 댓글 데이터 CSV 다운로드",
         data=csv,
         file_name="youtube_comments.csv",
         mime="text/csv"
@@ -143,9 +158,10 @@ if analyze_btn:
     st.divider()
 
     # -----------------------------
-    # 좋아요 상위 댓글
+    # 좋아요 TOP 10
     # -----------------------------
-    st.subheader("👍 좋아요 수가 많은 댓글 TOP 10")
+    st.subheader("👍 좋아요 수 TOP 10 댓글")
+
     top_like = df.sort_values("좋아요", ascending=False).head(10)
     st.dataframe(top_like[["작성자", "댓글", "좋아요"]], use_container_width=True)
 
@@ -160,7 +176,7 @@ if analyze_btn:
     st.divider()
 
     # -----------------------------
-    # 자주 등장하는 단어
+    # 단어 빈도 분석
     # -----------------------------
     st.subheader("🔤 자주 등장하는 단어 TOP 20")
 
@@ -190,37 +206,29 @@ if analyze_btn:
     # -----------------------------
     # 워드클라우드
     # -----------------------------
-    st.subheader("☁️ 자주 등장하는 단어 워드클라우드")
-
-    font_path = get_font_path()
-
-    if font_path is None:
-        st.error("""
-        한글 워드클라우드를 만들기 위한 폰트 파일이 없습니다.
-
-        GitHub 프로젝트 폴더에 `NanumGothic.ttf` 파일을 추가해주세요.
-        """)
-        st.stop()
+    st.subheader("☁️ 워드클라우드")
 
     try:
-        wc = WordCloud(
+        wordcloud = WordCloud(
             font_path=font_path,
             width=1000,
             height=500,
-            background_color="white"
+            background_color="white",
+            max_words=100
         ).generate_from_frequencies(word_counts)
 
         fig3, ax3 = plt.subplots(figsize=(12, 6))
-        ax3.imshow(wc, interpolation="bilinear")
+        ax3.imshow(wordcloud, interpolation="bilinear")
         ax3.axis("off")
         st.pyplot(fig3)
 
     except Exception as e:
         st.error("워드클라우드 생성 중 오류가 발생했습니다.")
         st.code(str(e))
+        st.stop()
 
 else:
-    st.info("왼쪽 사이드바에 유튜브 영상 URL을 입력하고 분석을 시작하세요.")
+    st.info("왼쪽 사이드바에 유튜브 영상 URL을 입력하고 [댓글 분석 시작]을 누르세요.")
 
     st.markdown("""
     ### 사용 방법
