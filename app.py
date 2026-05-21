@@ -1,244 +1,231 @@
 import streamlit as st
 import pandas as pd
-import requests
+import matplotlib.pyplot as plt
+from wordcloud import WordCloud
+from collections import Counter
 import re
 import os
-from urllib.parse import urlparse, parse_qs
-from collections import Counter
-import plotly.express as px
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
+from youtube_comment_downloader import YoutubeCommentDownloader
 
-st.set_page_config(page_title="유튜브 댓글 분석 웹앱", layout="wide")
+st.set_page_config(page_title="유튜브 댓글 분석기", page_icon="☁️", layout="wide")
 
-st.title("📺 유튜브 댓글 분석 웹앱")
-st.write("유튜브 영상 링크를 입력하면 댓글을 수집하고 분석합니다.")
+st.title("☁️ 유튜브 댓글 분석 웹앱")
+st.write("유튜브 영상 링크를 입력하면 댓글을 수집하고, 좋아요 수 분석과 워드클라우드를 보여줍니다.")
 
-API_KEY = st.secrets["YOUTUBE_API_KEY"]
+# -----------------------------
+# 한글 폰트 설정
+# -----------------------------
+FONT_PATH = "NanumGothic.ttf"
 
-STOPWORDS = {
-    "그리고", "하지만", "그래서", "정말", "진짜", "너무",
-    "영상", "댓글", "합니다", "입니다", "있는", "없는",
-    "좋아요", "ㅋㅋ", "ㅎㅎ", "ㅋㅋㅋ", "ㅎㅎㅎ",
-    "the", "and", "is", "are", "to", "of", "in", "for", "this", "that"
-}
-
-def extract_video_id(url):
-    parsed = urlparse(url)
-
-    if parsed.hostname in ["www.youtube.com", "youtube.com", "m.youtube.com"]:
-        if parsed.path == "/watch":
-            return parse_qs(parsed.query).get("v", [None])[0]
-        elif parsed.path.startswith("/shorts/"):
-            return parsed.path.split("/")[2]
-
-    if parsed.hostname == "youtu.be":
-        return parsed.path.lstrip("/")
-
+def get_font_path():
+    if os.path.exists(FONT_PATH):
+        return FONT_PATH
     return None
 
-def fetch_comments(video_id, max_comments):
+# -----------------------------
+# 유튜브 댓글 수집 함수
+# -----------------------------
+@st.cache_data(show_spinner=False)
+def load_comments(video_url, max_comments):
+    downloader = YoutubeCommentDownloader()
     comments = []
-    next_page_token = None
 
-    while len(comments) < max_comments:
-        api_url = "https://www.googleapis.com/youtube/v3/commentThreads"
-
-        params = {
-            "part": "snippet",
-            "videoId": video_id,
-            "key": API_KEY,
-            "maxResults": 100,
-            "textFormat": "plainText",
-            "order": "time"
-        }
-
-        if next_page_token:
-            params["pageToken"] = next_page_token
-
-        response = requests.get(api_url, params=params)
-        data = response.json()
-
-        if response.status_code != 200:
-            st.error("댓글 수집 중 오류가 발생했습니다.")
-            st.write(data)
-            break
-
-        for item in data.get("items", []):
-            snippet = item["snippet"]["topLevelComment"]["snippet"]
-
+    try:
+        for comment in downloader.get_comments_from_url(video_url, sort_by=0):
             comments.append({
-                "작성자": snippet.get("authorDisplayName"),
-                "댓글": snippet.get("textDisplay"),
-                "좋아요수": snippet.get("likeCount", 0),
-                "작성일시": snippet.get("publishedAt")
+                "작성자": comment.get("author", ""),
+                "댓글": comment.get("text", ""),
+                "좋아요": comment.get("votes", 0),
+                "시간": comment.get("time", "")
             })
 
             if len(comments) >= max_comments:
                 break
 
-        next_page_token = data.get("nextPageToken")
+    except Exception as e:
+        return pd.DataFrame(), str(e)
 
-        if not next_page_token:
-            break
+    return pd.DataFrame(comments), None
 
-    return pd.DataFrame(comments)
-
+# -----------------------------
+# 텍스트 전처리
+# -----------------------------
 def clean_text(text):
     text = str(text)
     text = re.sub(r"http\S+", " ", text)
     text = re.sub(r"[^가-힣a-zA-Z0-9\s]", " ", text)
-    text = text.lower()
-    return text
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
-def get_word_counts(texts):
-    all_words = []
+def extract_words(texts):
+    stopwords = {
+        "그리고", "하지만", "너무", "정말", "진짜", "영상", "댓글",
+        "입니다", "합니다", "해서", "하는", "있는", "없는",
+        "the", "and", "you", "this", "that", "with", "for"
+    }
 
-    for text in texts:
-        words = clean_text(text).split()
-        words = [w for w in words if len(w) >= 2 and w not in STOPWORDS]
-        all_words.extend(words)
+    all_text = " ".join(texts)
+    all_text = clean_text(all_text)
 
-    return Counter(all_words)
+    words = all_text.split()
+    words = [
+        w for w in words
+        if len(w) >= 2 and w not in stopwords
+    ]
 
-youtube_url = st.text_input("🔗 유튜브 영상 링크 입력")
+    return Counter(words)
 
-max_comments = st.slider(
-    "수집할 댓글 수",
-    min_value=20,
-    max_value=10000,
-    value=200,
-    step=20
-)
+# -----------------------------
+# 사이드바
+# -----------------------------
+st.sidebar.header("⚙️ 설정")
+video_url = st.sidebar.text_input("유튜브 영상 URL 입력")
+max_comments = st.sidebar.slider("수집할 댓글 수", 50, 1000, 300, 50)
 
-if st.button("댓글 수집 및 분석 시작"):
+analyze_btn = st.sidebar.button("댓글 분석 시작")
 
-    video_id = extract_video_id(youtube_url)
+# -----------------------------
+# 메인
+# -----------------------------
+if analyze_btn:
+    if not video_url:
+        st.warning("유튜브 영상 URL을 입력해주세요.")
+        st.stop()
 
-    if not video_id:
-        st.warning("올바른 유튜브 영상 링크를 입력하세요.")
+    with st.spinner("댓글을 수집하는 중입니다..."):
+        df, error = load_comments(video_url, max_comments)
 
-    else:
-        with st.spinner("댓글 수집 중입니다..."):
-            df = fetch_comments(video_id, max_comments)
+    if error:
+        st.error("댓글 수집 중 오류가 발생했습니다.")
+        st.code(error)
+        st.stop()
 
-        if df.empty:
-            st.warning("댓글을 가져오지 못했습니다. 댓글이 비활성화되었거나 API 키 문제가 있을 수 있습니다.")
+    if df.empty:
+        st.warning("수집된 댓글이 없습니다.")
+        st.stop()
 
-        else:
-            st.success(f"총 {len(df)}개의 댓글을 수집했습니다.")
+    st.success(f"댓글 {len(df)}개를 수집했습니다.")
 
-            df["작성일시"] = pd.to_datetime(df["작성일시"])
-            df["날짜"] = df["작성일시"].dt.date
-            df["시간"] = df["작성일시"].dt.hour
+    # 좋아요 숫자 정리
+    df["좋아요"] = pd.to_numeric(df["좋아요"], errors="coerce").fillna(0).astype(int)
 
-            st.subheader("📋 댓글 데이터")
-            st.dataframe(df, use_container_width=True)
+    # -----------------------------
+    # 요약 지표
+    # -----------------------------
+    col1, col2, col3 = st.columns(3)
 
-            csv = df.to_csv(index=False, encoding="utf-8-sig")
+    with col1:
+        st.metric("수집 댓글 수", f"{len(df)}개")
 
-            st.download_button(
-                "📥 댓글 데이터 CSV 다운로드",
-                data=csv,
-                file_name="youtube_comments.csv",
-                mime="text/csv"
-            )
+    with col2:
+        st.metric("총 좋아요 수", f"{df['좋아요'].sum():,}개")
 
-            col1, col2, col3 = st.columns(3)
+    with col3:
+        st.metric("평균 좋아요 수", f"{df['좋아요'].mean():.1f}개")
 
-            col1.metric("총 댓글 수", len(df))
-            col2.metric("총 좋아요 수", int(df["좋아요수"].sum()))
-            col3.metric("평균 좋아요 수", round(df["좋아요수"].mean(), 2))
+    st.divider()
 
-            st.subheader("📈 날짜별 댓글 추이")
+    # -----------------------------
+    # 댓글 원본 보기
+    # -----------------------------
+    st.subheader("📋 수집된 댓글")
+    st.dataframe(df, use_container_width=True)
 
-            daily = df.groupby("날짜").size().reset_index(name="댓글 수")
+    # CSV 다운로드
+    csv = df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        label="댓글 데이터 CSV 다운로드",
+        data=csv,
+        file_name="youtube_comments.csv",
+        mime="text/csv"
+    )
 
-            fig_daily = px.line(
-                daily,
-                x="날짜",
-                y="댓글 수",
-                markers=True,
-                title="날짜별 댓글 수 변화"
-            )
+    st.divider()
 
-            st.plotly_chart(fig_daily, use_container_width=True)
+    # -----------------------------
+    # 좋아요 상위 댓글
+    # -----------------------------
+    st.subheader("👍 좋아요 수가 많은 댓글 TOP 10")
+    top_like = df.sort_values("좋아요", ascending=False).head(10)
+    st.dataframe(top_like[["작성자", "댓글", "좋아요"]], use_container_width=True)
 
-            st.subheader("⏰ 시간대별 댓글 분포")
+    fig1, ax1 = plt.subplots(figsize=(10, 5))
+    ax1.barh(top_like["작성자"].astype(str), top_like["좋아요"])
+    ax1.set_xlabel("좋아요 수")
+    ax1.set_ylabel("작성자")
+    ax1.set_title("좋아요 수 TOP 10")
+    ax1.invert_yaxis()
+    st.pyplot(fig1)
 
-            hourly = df.groupby("시간").size().reset_index(name="댓글 수")
+    st.divider()
 
-            fig_hourly = px.bar(
-                hourly,
-                x="시간",
-                y="댓글 수",
-                title="시간대별 댓글 수"
-            )
+    # -----------------------------
+    # 자주 등장하는 단어
+    # -----------------------------
+    st.subheader("🔤 자주 등장하는 단어 TOP 20")
 
-            st.plotly_chart(fig_hourly, use_container_width=True)
+    word_counts = extract_words(df["댓글"].tolist())
 
-            st.subheader("👍 좋아요 수가 많은 댓글 TOP 10")
+    if len(word_counts) == 0:
+        st.warning("분석할 단어가 부족합니다.")
+        st.stop()
 
-            top_likes = df.sort_values("좋아요수", ascending=False).head(10)
+    word_df = pd.DataFrame(
+        word_counts.most_common(20),
+        columns=["단어", "빈도"]
+    )
 
-            fig_likes = px.bar(
-                top_likes,
-                x="좋아요수",
-                y="댓글",
-                orientation="h",
-                title="좋아요 수 TOP 10 댓글"
-            )
+    st.dataframe(word_df, use_container_width=True)
 
-            st.plotly_chart(fig_likes, use_container_width=True)
+    fig2, ax2 = plt.subplots(figsize=(10, 5))
+    ax2.bar(word_df["단어"], word_df["빈도"])
+    ax2.set_xlabel("단어")
+    ax2.set_ylabel("빈도")
+    ax2.set_title("자주 등장하는 단어 TOP 20")
+    plt.xticks(rotation=45)
+    st.pyplot(fig2)
 
-            st.subheader("☁️ 자주 등장하는 단어 워드클라우드")
+    st.divider()
 
-            word_counts = get_word_counts(df["댓글"])
+    # -----------------------------
+    # 워드클라우드
+    # -----------------------------
+    st.subheader("☁️ 자주 등장하는 단어 워드클라우드")
 
-            if len(word_counts) > 0:
+    font_path = get_font_path()
 
-                font_path = "NanumGothic.ttf"
-                wc = None
+    if font_path is None:
+        st.error("""
+        한글 워드클라우드를 만들기 위한 폰트 파일이 없습니다.
 
-                try:
-                    if os.path.exists(font_path):
-                        wc = WordCloud(
-                            font_path=font_path,
-                            width=1200,
-                            height=600,
-                            background_color="white"
-                        ).generate_from_frequencies(word_counts)
-                    else:
-                        st.warning("NanumGothic.ttf 파일이 없어 워드클라우드는 생략합니다.")
+        GitHub 프로젝트 폴더에 `NanumGothic.ttf` 파일을 추가해주세요.
+        """)
+        st.stop()
 
-                    if wc is not None:
-                        fig, ax = plt.subplots(figsize=(15, 7))
-                        ax.imshow(wc, interpolation="bilinear")
-                        ax.axis("off")
-                        st.pyplot(fig)
+    try:
+        wc = WordCloud(
+            font_path=font_path,
+            width=1000,
+            height=500,
+            background_color="white"
+        ).generate_from_frequencies(word_counts)
 
-                except Exception:
-                    st.error("워드클라우드 생성 중 오류가 발생했습니다.")
-                    st.info("NanumGothic.ttf 파일을 삭제 후 다시 업로드하거나, 아래 단어 빈도표를 사용하세요.")
+        fig3, ax3 = plt.subplots(figsize=(12, 6))
+        ax3.imshow(wc, interpolation="bilinear")
+        ax3.axis("off")
+        st.pyplot(fig3)
 
-                st.subheader("🔤 자주 등장한 단어 TOP 20")
+    except Exception as e:
+        st.error("워드클라우드 생성 중 오류가 발생했습니다.")
+        st.code(str(e))
 
-                word_df = pd.DataFrame(
-                    word_counts.most_common(20),
-                    columns=["단어", "빈도"]
-                )
+else:
+    st.info("왼쪽 사이드바에 유튜브 영상 URL을 입력하고 분석을 시작하세요.")
 
-                st.dataframe(word_df, use_container_width=True)
-
-                fig_words = px.bar(
-                    word_df,
-                    x="빈도",
-                    y="단어",
-                    orientation="h",
-                    title="자주 등장한 단어 TOP 20"
-                )
-
-                st.plotly_chart(fig_words, use_container_width=True)
-
-            else:
-                st.info("분석 가능한 단어가 부족합니다.")
+    st.markdown("""
+    ### 사용 방법
+    1. 유튜브 영상 URL 입력  
+    2. 수집할 댓글 수 선택  
+    3. 댓글 분석 시작 클릭  
+    4. 댓글 목록, 좋아요 분석, 단어 빈도, 워드클라우드 확인  
+    """)
