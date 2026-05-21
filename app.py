@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
 from wordcloud import WordCloud
 from collections import Counter
 import re
@@ -13,7 +14,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("☁️ 자주 등장하는 단어 워드클라우드")
+st.title("☁️ 유튜브 댓글 분석 웹앱")
 st.write("유튜브 영상 링크를 입력하면 댓글을 수집하고 자주 등장하는 단어를 분석합니다.")
 
 # -----------------------------
@@ -25,6 +26,14 @@ def get_font_path():
     if os.path.exists(FONT_PATH):
         return FONT_PATH
     return None
+
+font_path = get_font_path()
+
+if font_path:
+    font_prop = fm.FontProperties(fname=font_path)
+    plt.rcParams["axes.unicode_minus"] = False
+else:
+    font_prop = None
 
 # -----------------------------
 # 댓글 수집
@@ -62,6 +71,7 @@ def extract_words(text_list):
         "그리고", "하지만", "너무", "정말", "진짜", "영상", "댓글",
         "입니다", "합니다", "해서", "하는", "있는", "없는", "으로",
         "에서", "에게", "이거", "저거", "그거", "ㅋㅋ", "ㅎㅎ",
+        "때문", "같아요", "좋아요", "정도", "이번", "오늘",
         "the", "and", "you", "this", "that", "with", "for", "are"
     }
 
@@ -75,6 +85,21 @@ def extract_words(text_list):
     ]
 
     return Counter(words)
+
+# -----------------------------
+# matplotlib 한글 적용 함수
+# -----------------------------
+def apply_korean_font(ax):
+    if font_prop is not None:
+        ax.title.set_fontproperties(font_prop)
+        ax.xaxis.label.set_fontproperties(font_prop)
+        ax.yaxis.label.set_fontproperties(font_prop)
+
+        for label in ax.get_xticklabels():
+            label.set_fontproperties(font_prop)
+
+        for label in ax.get_yticklabels():
+            label.set_fontproperties(font_prop)
 
 # -----------------------------
 # 사이드바
@@ -103,8 +128,6 @@ if start_button:
     if not video_url:
         st.warning("유튜브 영상 URL을 입력해주세요.")
         st.stop()
-
-    font_path = get_font_path()
 
     if font_path is None:
         st.error("NanumGothic.ttf 파일을 찾을 수 없습니다. GitHub에 폰트 파일을 업로드해주세요.")
@@ -171,6 +194,7 @@ if start_button:
     ax1.set_ylabel("작성자")
     ax1.set_title("좋아요 수 TOP 10")
     ax1.invert_yaxis()
+    apply_korean_font(ax1)
     st.pyplot(fig1)
 
     st.divider()
@@ -198,7 +222,13 @@ if start_button:
     ax2.set_xlabel("단어")
     ax2.set_ylabel("빈도")
     ax2.set_title("자주 등장하는 단어 TOP 20")
-    plt.xticks(rotation=45)
+
+    for label in ax2.get_xticklabels():
+        label.set_rotation(45)
+        label.set_ha("right")
+
+    apply_korean_font(ax2)
+    plt.tight_layout()
     st.pyplot(fig2)
 
     st.divider()
