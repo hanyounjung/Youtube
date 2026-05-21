@@ -1,5 +1,8 @@
 streamlit
 pandas
-matplotlib
+requests
+plotly
 wordcloud
-youtube-comment-downloader
+matplotlib
+konlpy
+JPype1
