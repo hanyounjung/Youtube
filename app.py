@@ -1,152 +1,167 @@
+import re
+import requests
+import pandas as pd
 import streamlit as st
+import plotly.express as px
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+from collections import Counter
+from konlpy.tag import Okt
 
-st.set_page_config(
-    page_title="MBTI 진로 & 포켓몬 추천",
-    page_icon="🎮",
-    layout="wide"
-)
+st.set_page_config(page_title="유튜브 댓글 분석기", layout="wide")
 
-st.title("🎮 MBTI 진로 & 포켓몬 캐릭터 추천")
-st.write("MBTI를 선택하면 어울리는 진로와 포켓몬 캐릭터를 추천해줍니다.")
+st.title("📺 유튜브 댓글 분석 웹앱")
+st.caption("유튜브 영상 링크를 입력하면 댓글을 수집하고 시간대별 추이, 좋아요 수, 자주 등장하는 단어를 분석합니다.")
 
-mbti_data = {
-    "INTJ": {
-        "nickname": "전략가형",
-        "career": ["데이터 분석가", "인공지능 개발자", "전략기획자", "연구원", "소프트웨어 엔지니어"],
-        "pokemon": "뮤츠",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/150.png",
-        "reason": "논리적이고 독립적이며 전략적으로 문제를 해결하는 성향이 강합니다."
-    },
-    "INTP": {
-        "nickname": "논리술사형",
-        "career": ["프로그래머", "과학자", "게임 개발자", "정보보안 전문가", "발명가"],
-        "pokemon": "메타몽",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/132.png",
-        "reason": "호기심이 많고 새로운 아이디어를 탐구하는 데 강점이 있습니다."
-    },
-    "ENTJ": {
-        "nickname": "통솔자형",
-        "career": ["CEO", "프로젝트 매니저", "변호사", "경영 컨설턴트", "창업가"],
-        "pokemon": "리자몽",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/6.png",
-        "reason": "목표 지향적이고 리더십이 뛰어나 조직을 이끄는 역할에 잘 어울립니다."
-    },
-    "ENTP": {
-        "nickname": "토론가형",
-        "career": ["마케터", "기획자", "광고 전문가", "스타트업 창업가", "방송인"],
-        "pokemon": "고라파덕",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/54.png",
-        "reason": "아이디어가 풍부하고 유연한 사고로 새로운 도전을 즐깁니다."
-    },
-    "INFJ": {
-        "nickname": "옹호자형",
-        "career": ["상담가", "교사", "작가", "사회복지사", "심리학자"],
-        "pokemon": "라티아스",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/380.png",
-        "reason": "사람을 깊이 이해하고 의미 있는 가치를 추구하는 성향이 있습니다."
-    },
-    "INFP": {
-        "nickname": "중재자형",
-        "career": ["작가", "디자이너", "일러스트레이터", "상담사", "콘텐츠 크리에이터"],
-        "pokemon": "이브이",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/133.png",
-        "reason": "감수성이 풍부하고 자신만의 가능성과 개성을 중요하게 생각합니다."
-    },
-    "ENFJ": {
-        "nickname": "선도자형",
-        "career": ["교사", "강사", "인사담당자", "상담가", "사회운동가"],
-        "pokemon": "피카츄",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/25.png",
-        "reason": "타인에게 긍정적인 영향을 주고 함께 성장하는 것을 좋아합니다."
-    },
-    "ENFP": {
-        "nickname": "활동가형",
-        "career": ["유튜버", "홍보 전문가", "이벤트 기획자", "배우", "창작자"],
-        "pokemon": "파이리",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/4.png",
-        "reason": "에너지가 넘치고 창의적인 표현 활동에 강점이 있습니다."
-    },
-    "ISTJ": {
-        "nickname": "현실주의자형",
-        "career": ["공무원", "회계사", "품질관리자", "법무사", "데이터 관리자"],
-        "pokemon": "꼬부기",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/7.png",
-        "reason": "책임감이 강하고 체계적이며 정확한 업무에 잘 어울립니다."
-    },
-    "ISFJ": {
-        "nickname": "수호자형",
-        "career": ["간호사", "교사", "사회복지사", "행정직", "보건의료직"],
-        "pokemon": "럭키",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/113.png",
-        "reason": "배려심이 깊고 다른 사람을 돕는 일에서 보람을 느낍니다."
-    },
-    "ESTJ": {
-        "nickname": "경영자형",
-        "career": ["관리자", "경찰관", "군인", "행정가", "금융 전문가"],
-        "pokemon": "거북왕",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/9.png",
-        "reason": "규칙과 질서를 중시하며 책임감 있게 조직을 운영합니다."
-    },
-    "ESFJ": {
-        "nickname": "집정관형",
-        "career": ["교사", "간호사", "서비스 관리자", "홍보 담당자", "호텔리어"],
-        "pokemon": "푸린",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/39.png",
-        "reason": "사교성이 좋고 주변 사람들과 조화롭게 협력하는 데 강합니다."
-    },
-    "ISTP": {
-        "nickname": "장인형",
-        "career": ["엔지니어", "자동차 정비사", "드론 조종사", "소방관", "기계 설계자"],
-        "pokemon": "루카리오",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/448.png",
-        "reason": "손으로 직접 만들고 문제를 해결하는 실용적인 능력이 뛰어납니다."
-    },
-    "ISFP": {
-        "nickname": "모험가형",
-        "career": ["디자이너", "사진작가", "미용사", "음악가", "플로리스트"],
-        "pokemon": "님피아",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/700.png",
-        "reason": "감각적이고 예술적인 표현을 즐기며 섬세한 감성이 돋보입니다."
-    },
-    "ESTP": {
-        "nickname": "사업가형",
-        "career": ["영업 전문가", "운동선수", "경찰관", "응급구조사", "이벤트 기획자"],
-        "pokemon": "잠만보",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/143.png",
-        "reason": "활동적이고 상황 판단이 빨라 현장에서 강점을 발휘합니다."
-    },
-    "ESFP": {
-        "nickname": "연예인형",
-        "career": ["배우", "가수", "크리에이터", "뷰티 아티스트", "행사 진행자"],
-        "pokemon": "토게피",
-        "image": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/175.png",
-        "reason": "밝고 활발하며 사람들에게 즐거움을 주는 활동에 잘 어울립니다."
+API_KEY = st.secrets["YOUTUBE_API_KEY"]
+
+okt = Okt()
+
+def extract_video_id(url):
+    patterns = [
+        r"v=([^&]+)",
+        r"youtu\.be/([^?&]+)",
+        r"shorts/([^?&]+)",
+        r"embed/([^?&]+)"
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
+
+def get_comments(video_id, max_pages=10):
+    comments = []
+    page_token = ""
+
+    for _ in range(max_pages):
+        url = "https://www.googleapis.com/youtube/v3/commentThreads"
+        params = {
+            "part": "snippet",
+            "videoId": video_id,
+            "key": API_KEY,
+            "maxResults": 100,
+            "order": "time",
+            "pageToken": page_token,
+            "textFormat": "plainText"
+        }
+
+        res = requests.get(url, params=params)
+        data = res.json()
+
+        if "error" in data:
+            st.error(data["error"]["message"])
+            break
+
+        for item in data.get("items", []):
+            snippet = item["snippet"]["topLevelComment"]["snippet"]
+            comments.append({
+                "작성자": snippet.get("authorDisplayName"),
+                "댓글": snippet.get("textDisplay"),
+                "좋아요수": snippet.get("likeCount", 0),
+                "작성시간": snippet.get("publishedAt")
+            })
+
+        page_token = data.get("nextPageToken", "")
+        if not page_token:
+            break
+
+    return pd.DataFrame(comments)
+
+def extract_keywords(texts):
+    words = []
+    stopwords = {
+        "그리고", "하지만", "진짜", "너무", "정말", "영상", "댓글",
+        "입니다", "합니다", "있다", "없다", "ㅋㅋ", "ㅎㅎ", "ㅠㅠ"
     }
-}
 
-mbti = st.selectbox(
-    "나의 MBTI를 선택하세요",
-    list(mbti_data.keys())
+    for text in texts:
+        nouns = okt.nouns(str(text))
+        words.extend([w for w in nouns if len(w) >= 2 and w not in stopwords])
+
+    return Counter(words)
+
+youtube_url = st.text_input("유튜브 영상 링크 입력")
+
+max_pages = st.slider(
+    "수집할 댓글 페이지 수",
+    min_value=1,
+    max_value=30,
+    value=10,
+    help="1페이지당 최대 100개 댓글을 수집합니다."
 )
 
-result = mbti_data[mbti]
+if st.button("댓글 분석 시작"):
+    video_id = extract_video_id(youtube_url)
 
-st.divider()
+    if not video_id:
+        st.warning("올바른 유튜브 영상 링크를 입력해주세요.")
+        st.stop()
 
-col1, col2 = st.columns([1, 2])
+    with st.spinner("댓글을 수집하고 분석하는 중입니다..."):
+        df = get_comments(video_id, max_pages=max_pages)
 
-with col1:
-    st.image(result["image"], width=220)
-    st.subheader(f"추천 포켓몬: {result['pokemon']}")
+    if df.empty:
+        st.warning("수집된 댓글이 없습니다. 댓글이 비활성화되었거나 API 제한이 있을 수 있습니다.")
+        st.stop()
 
-with col2:
-    st.header(f"{mbti} - {result['nickname']}")
-    st.write(result["reason"])
+    df["작성시간"] = pd.to_datetime(df["작성시간"])
+    df["날짜"] = df["작성시간"].dt.date
+    df["시간대"] = df["작성시간"].dt.hour
 
-    st.subheader("💼 어울리는 진로")
-    for job in result["career"]:
-        st.write(f"- {job}")
+    st.success(f"총 {len(df)}개의 댓글을 수집했습니다.")
 
-st.divider()
+    col1, col2, col3 = st.columns(3)
+    col1.metric("총 댓글 수", len(df))
+    col2.metric("평균 좋아요 수", round(df["좋아요수"].mean(), 2))
+    col3.metric("최대 좋아요 수", int(df["좋아요수"].max()))
 
-st.info("※ 이 결과는 재미와 진로 탐색 활동을 위한 참고용입니다. 실제 진로 선택은 흥미, 역량, 가치관, 경험을 함께 고려해야 합니다.")
+    st.subheader("📄 댓글 데이터")
+    st.dataframe(df, use_container_width=True)
+
+    st.subheader("🕒 날짜별 댓글 추이")
+    daily = df.groupby("날짜").size().reset_index(name="댓글수")
+    fig_daily = px.line(daily, x="날짜", y="댓글수", markers=True)
+    st.plotly_chart(fig_daily, use_container_width=True)
+
+    st.subheader("⏰ 시간대별 댓글 수")
+    hourly = df.groupby("시간대").size().reset_index(name="댓글수")
+    fig_hourly = px.bar(hourly, x="시간대", y="댓글수")
+    st.plotly_chart(fig_hourly, use_container_width=True)
+
+    st.subheader("👍 좋아요 수 상위 댓글")
+    top_like = df.sort_values("좋아요수", ascending=False).head(10)
+    st.dataframe(top_like[["작성자", "댓글", "좋아요수", "작성시간"]], use_container_width=True)
+
+    st.subheader("☁️ 자주 등장하는 단어 워드클라우드")
+    counter = extract_keywords(df["댓글"])
+
+    if counter:
+        wc = WordCloud(
+            font_path="NanumGothic.ttf",
+            width=1000,
+            height=500,
+            background_color="white"
+        ).generate_from_frequencies(counter)
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.imshow(wc, interpolation="bilinear")
+        ax.axis("off")
+        st.pyplot(fig)
+
+        st.subheader("🔤 단어 빈도 TOP 20")
+        word_df = pd.DataFrame(counter.most_common(20), columns=["단어", "빈도"])
+        st.dataframe(word_df, use_container_width=True)
+
+        fig_words = px.bar(word_df, x="단어", y="빈도")
+        st.plotly_chart(fig_words, use_container_width=True)
+    else:
+        st.info("분석할 단어가 충분하지 않습니다.")
+
+    csv = df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        "📥 댓글 데이터 CSV 다운로드",
+        data=csv,
+        file_name="youtube_comments.csv",
+        mime="text/csv"
+    )
